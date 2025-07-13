@@ -1,0 +1,157 @@
+import React, { useEffect, useState } from "react";
+import { initializeApp } from "firebase/app";
+import {
+  getAuth,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  signOut,
+} from "firebase/auth";
+import {
+  getFirestore,
+  collection,
+  addDoc,
+  query,
+  where,
+  getDocs,
+  Timestamp,
+} from "firebase/firestore";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { format } from "date-fns";
+
+const firebaseConfig = {
+  apiKey: "YOUR_FIREBASE_API_KEY",
+  authDomain: "YOUR_FIREBASE_AUTH_DOMAIN",
+  projectId: "YOUR_FIREBASE_PROJECT_ID",
+  storageBucket: "YOUR_FIREBASE_STORAGE_BUCKET",
+  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+  appId: "YOUR_FIREBASE_APP_ID",
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+export default function TimekeepingApp() {
+  const [user, setUser] = useState(null);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [entries, setEntries] = useState([]);
+  const [clockedIn, setClockedIn] = useState(false);
+  const [isNewUser, setIsNewUser] = useState(false);
+
+  useEffect(() => {
+    onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      if (currentUser) loadEntries(currentUser.uid);
+    });
+  }, []);
+
+  const loadEntries = async (uid) => {
+    const q = query(collection(db, "entries"), where("uid", "==", uid));
+    const snapshot = await getDocs(q);
+    const loaded = snapshot.docs.map((doc) => doc.data());
+    setEntries(loaded);
+  };
+
+  const handleLogin = async () => {
+    try {
+      const res = isNewUser
+        ? await createUserWithEmailAndPassword(auth, email, password)
+        : await signInWithEmailAndPassword(auth, email, password);
+      setUser(res.user);
+      setEmail("");
+      setPassword("");
+    } catch (error) {
+      alert(error.message);
+    }
+  };
+
+  const handleClock = async (type) => {
+    if (!user) return;
+    const entry = {
+      uid: user.uid,
+      type,
+      timestamp: Timestamp.now(),
+    };
+    await addDoc(collection(db, "entries"), entry);
+    setEntries((prev) => [...prev, entry]);
+    setClockedIn(type === "Clock In");
+  };
+
+  const handleLogout = async () => {
+    await signOut(auth);
+    setUser(null);
+    setEntries([]);
+    setClockedIn(false);
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-100 p-6 flex flex-col items-center space-y-6">
+      {!user ? (
+        <Card className="w-full max-w-sm">
+          <CardContent className="space-y-4">
+            <h2 className="text-xl font-bold">Login</h2>
+            <Input
+              placeholder="Email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+            <Input
+              type="password"
+              placeholder="Password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={isNewUser}
+                onChange={() => setIsNewUser(!isNewUser)}
+              />
+              <label>Create new account</label>
+            </div>
+            <Button onClick={handleLogin}>{isNewUser ? "Sign Up" : "Login"}</Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          <Card className="w-full max-w-2xl">
+            <CardContent className="space-y-4">
+              <div className="flex justify-between items-center">
+                <h2 className="text-xl font-bold">Welcome, {user.email}</h2>
+                <Button variant="secondary" onClick={handleLogout}>
+                  Logout
+                </Button>
+              </div>
+              <div className="flex gap-2">
+                <Button disabled={clockedIn} onClick={() => handleClock("Clock In")}>Clock In</Button>
+                <Button disabled={!clockedIn} onClick={() => handleClock("Clock Out")}>Clock Out</Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="w-full max-w-2xl">
+            <CardContent className="space-y-2">
+              <h3 className="text-lg font-semibold">Time Entries</h3>
+              {entries.length === 0 ? (
+                <p className="text-gray-500">No entries yet.</p>
+              ) : (
+                <ul className="space-y-1">
+                  {entries.map((entry, index) => (
+                    <li key={index} className="flex justify-between">
+                      <span>{entry.type}</span>
+                      <span>{format(entry.timestamp.toDate(), "PPpp")}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
